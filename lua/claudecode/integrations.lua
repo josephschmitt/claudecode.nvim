@@ -16,7 +16,7 @@ function M.get_selected_files_from_tree()
     return M._get_neotree_selection()
   elseif current_ft == "oil" then
     return M._get_oil_selection()
-  elseif current_ft == "snacks" then
+  elseif current_ft == "snacks_layout_box" then
     return M._get_snacks_selection()
   else
     return nil, "Not in a supported tree buffer (current filetype: " .. current_ft .. ")"
@@ -273,6 +273,12 @@ function M._get_snacks_selection()
     return {}, "snacks file explorer not available"
   end
 
+  -- Get the picker instance from the current buffer
+  local picker = snacks.picker.get()
+  if not picker then
+    return {}, "No active snacks picker found"
+  end
+
   local files = {}
   
   -- Check if we're in visual mode
@@ -282,45 +288,27 @@ function M._get_snacks_selection()
     local visual_commands = require("claudecode.visual_commands")
     local start_line, end_line = visual_commands.get_visual_range()
     
-    -- Get current directory and entries
-    local entries_ok, entries = pcall(function() 
-      return snacks.get_entries() 
-    end)
+    -- Get current directory from picker
+    local current_dir = picker:dir()
     
-    if not entries_ok or not entries then
-      return {}, "Failed to get snacks entries"
-    end
-    
-    local dir_ok, current_dir = pcall(function()
-      return snacks.get_current_dir()
-    end)
-    
-    if not dir_ok or not current_dir then
+    if not current_dir then
       return {}, "Failed to get current directory"
     end
     
     -- Process each line in the visual selection
     for line = start_line, end_line do
-      -- Adjust line to 0-based index if snacks API expects it
-      local entry_index = line - 1
+      -- Get the item at the current line
+      local item_ok, item = pcall(function()
+        return picker:get_item(line)
+      end)
       
-      -- Skip if the line is out of bounds
-      if entry_index >= 0 and entry_index < #entries then
-        local entry = entries[entry_index + 1] -- Lua tables are 1-indexed
+      if item_ok and item and item.file then
+        local full_path = item.file
         
-        if entry and entry.name and entry.name ~= ".." and entry.name ~= "." then
-          local full_path = current_dir .. entry.name
-          
-          -- Handle various entry types
-          if entry.type == "file" then
-            table.insert(files, full_path)
-          elseif entry.type == "directory" then
-            -- Ensure directory paths end with /
-            table.insert(files, full_path:match("/$") and full_path or full_path .. "/")
-          else
-            -- For unknown types, return the path anyway
-            table.insert(files, full_path)
-          end
+        -- Skip parent directory entries
+        local basename = vim.fn.fnamemodify(full_path, ":t")
+        if basename ~= ".." and basename ~= "." then
+          table.insert(files, full_path)
         end
       end
     end
@@ -330,36 +318,18 @@ function M._get_snacks_selection()
     end
   else
     -- Normal mode: get file under cursor
-    local entry_ok, entry = pcall(function()
-      return snacks.get_cursor_entry()
-    end)
+    local current_item = picker:current()
     
-    if not entry_ok or not entry then
-      return {}, "Failed to get cursor entry"
+    if not current_item or not current_item.file then
+      return {}, "Failed to get current item"
     end
     
-    local dir_ok, current_dir = pcall(function()
-      return snacks.get_current_dir()
-    end)
+    local full_path = current_item.file
+    local basename = vim.fn.fnamemodify(full_path, ":t")
     
-    if not dir_ok or not current_dir then
-      return {}, "Failed to get current directory"
-    end
-    
-    -- Process the entry
-    if entry.name and entry.name ~= ".." and entry.name ~= "." then
-      local full_path = current_dir .. entry.name
-      
-      -- Handle various entry types
-      if entry.type == "file" then
-        return { full_path }, nil
-      elseif entry.type == "directory" then
-        -- Ensure directory paths end with /
-        return { full_path:match("/$") and full_path or full_path .. "/" }, nil
-      else
-        -- For unknown types, return the path anyway
-        return { full_path }, nil
-      end
+    -- Skip parent directory entries
+    if basename ~= ".." and basename ~= "." then
+      return { full_path }, nil
     end
   end
   

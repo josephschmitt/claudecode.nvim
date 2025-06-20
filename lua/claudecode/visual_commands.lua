@@ -391,45 +391,33 @@ function M.get_files_from_visual_selection(visual_data)
   elseif tree_type == "snacks" then
     local snacks = tree_state
     
-    -- Get current directory and entries
-    local entries_ok, entries = pcall(function() 
-      return snacks.get_entries() 
-    end)
-    
-    if not entries_ok or not entries then
-      return {}, "Failed to get snacks entries"
+    -- Get the picker instance
+    local picker = snacks.picker.get()
+    if not picker then
+      return {}, "No active snacks picker found"
     end
     
-    local dir_ok, current_dir = pcall(function()
-      return snacks.get_current_dir()
-    end)
+    -- Get current directory from picker
+    local current_dir = picker:dir()
     
-    if not dir_ok or not current_dir then
+    if not current_dir then
       return {}, "Failed to get current directory"
     end
     
     -- Process each line in the visual selection
     for line = start_pos, end_pos do
-      -- Adjust line to 0-based index if snacks API expects it
-      local entry_index = line - 1
+      -- Get the item at the current line
+      local item_ok, item = pcall(function()
+        return picker:get_item(line)
+      end)
       
-      -- Skip if the line is out of bounds
-      if entry_index >= 0 and entry_index < #entries then
-        local entry = entries[entry_index + 1] -- Lua tables are 1-indexed
+      if item_ok and item and item.file then
+        local full_path = item.file
         
-        if entry and entry.name and entry.name ~= ".." and entry.name ~= "." then
-          local full_path = current_dir .. entry.name
-          
-          -- Handle various entry types
-          if entry.type == "file" then
-            table.insert(files, full_path)
-          elseif entry.type == "directory" then
-            -- Ensure directory paths end with /
-            table.insert(files, full_path:match("/$") and full_path or full_path .. "/")
-          else
-            -- For unknown types, return the path anyway
-            table.insert(files, full_path)
-          end
+        -- Skip parent directory entries
+        local basename = vim.fn.fnamemodify(full_path, ":t")
+        if basename ~= ".." and basename ~= "." then
+          table.insert(files, full_path)
         end
       end
     end
