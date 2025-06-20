@@ -135,7 +135,7 @@ function M.get_visual_range()
 end
 
 --- Check if we're in a tree buffer and get the tree state
---- @return table|nil, string|nil tree_state, tree_type ("neo-tree" or "nvim-tree")
+--- @return table|nil, string|nil tree_state, tree_type ("neo-tree", "nvim-tree", "oil", or "snacks")
 function M.get_tree_state()
   local current_ft = "" -- Default fallback
   local current_win = 0 -- Default fallback
@@ -181,6 +181,13 @@ function M.get_tree_state()
     end
 
     return oil, "oil"
+  elseif current_ft == "snacks" then
+    local snacks_success, snacks = pcall(require, "snacks")
+    if not snacks_success then
+      return nil, nil
+    end
+
+    return snacks, "snacks"
   else
     return nil, nil
   end
@@ -381,6 +388,59 @@ function M.get_files_from_visual_selection(visual_data)
         end
       end
     end
+  elseif tree_type == "snacks" then
+    local snacks = tree_state
+    
+    -- Get current directory and entries
+    local entries_ok, entries = pcall(function() 
+      return snacks.get_entries() 
+    end)
+    
+    if not entries_ok or not entries then
+      return {}, "Failed to get snacks entries"
+    end
+    
+    local dir_ok, current_dir = pcall(function()
+      return snacks.get_current_dir()
+    end)
+    
+    if not dir_ok or not current_dir then
+      return {}, "Failed to get current directory"
+    end
+    
+    -- Process each line in the visual selection
+    for line = start_pos, end_pos do
+      -- Adjust line to 0-based index if snacks API expects it
+      local entry_index = line - 1
+      
+      -- Skip if the line is out of bounds
+      if entry_index >= 0 and entry_index < #entries then
+        local entry = entries[entry_index + 1] -- Lua tables are 1-indexed
+        
+        if entry and entry.name and entry.name ~= ".." and entry.name ~= "." then
+          local full_path = current_dir .. entry.name
+          
+          -- Handle various entry types
+          if entry.type == "file" then
+            table.insert(files, full_path)
+          elseif entry.type == "directory" then
+            -- Ensure directory paths end with /
+            table.insert(files, full_path:match("/$") and full_path or full_path .. "/")
+          else
+            -- For unknown types, return the path anyway
+            table.insert(files, full_path)
+          end
+        end
+      end
+    end
+    
+    -- Log debug info
+    require("claudecode.logger").debug(
+      "visual_commands",
+      "Extracted",
+      #files,
+      "files from snacks visual selection"
+    )
   end
 
   return files, nil

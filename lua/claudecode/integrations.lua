@@ -1,6 +1,6 @@
 ---
 -- Tree integration module for ClaudeCode.nvim
--- Handles detection and selection of files from nvim-tree, neo-tree, and oil.nvim
+-- Handles detection and selection of files from nvim-tree, neo-tree, oil.nvim, and snacks
 -- @module claudecode.integrations
 local M = {}
 
@@ -16,6 +16,8 @@ function M.get_selected_files_from_tree()
     return M._get_neotree_selection()
   elseif current_ft == "oil" then
     return M._get_oil_selection()
+  elseif current_ft == "snacks" then
+    return M._get_snacks_selection()
   else
     return nil, "Not in a supported tree buffer (current filetype: " .. current_ft .. ")"
   end
@@ -258,6 +260,109 @@ function M._get_oil_selection()
     end
   end
 
+  return {}, "No file found under cursor"
+end
+
+--- Get selected files from snacks file explorer
+--- Supports both visual selection and single file under cursor
+--- @return table files List of file paths
+--- @return string|nil error Error message if operation failed
+function M._get_snacks_selection()
+  local success, snacks = pcall(require, "snacks")
+  if not success then
+    return {}, "snacks file explorer not available"
+  end
+
+  local files = {}
+  
+  -- Check if we're in visual mode
+  local mode = vim.fn.mode()
+  if mode == "V" or mode == "v" or mode == "\22" then
+    -- Visual mode: use the common visual range function
+    local visual_commands = require("claudecode.visual_commands")
+    local start_line, end_line = visual_commands.get_visual_range()
+    
+    -- Get current directory and entries
+    local entries_ok, entries = pcall(function() 
+      return snacks.get_entries() 
+    end)
+    
+    if not entries_ok or not entries then
+      return {}, "Failed to get snacks entries"
+    end
+    
+    local dir_ok, current_dir = pcall(function()
+      return snacks.get_current_dir()
+    end)
+    
+    if not dir_ok or not current_dir then
+      return {}, "Failed to get current directory"
+    end
+    
+    -- Process each line in the visual selection
+    for line = start_line, end_line do
+      -- Adjust line to 0-based index if snacks API expects it
+      local entry_index = line - 1
+      
+      -- Skip if the line is out of bounds
+      if entry_index >= 0 and entry_index < #entries then
+        local entry = entries[entry_index + 1] -- Lua tables are 1-indexed
+        
+        if entry and entry.name and entry.name ~= ".." and entry.name ~= "." then
+          local full_path = current_dir .. entry.name
+          
+          -- Handle various entry types
+          if entry.type == "file" then
+            table.insert(files, full_path)
+          elseif entry.type == "directory" then
+            -- Ensure directory paths end with /
+            table.insert(files, full_path:match("/$") and full_path or full_path .. "/")
+          else
+            -- For unknown types, return the path anyway
+            table.insert(files, full_path)
+          end
+        end
+      end
+    end
+    
+    if #files > 0 then
+      return files, nil
+    end
+  else
+    -- Normal mode: get file under cursor
+    local entry_ok, entry = pcall(function()
+      return snacks.get_cursor_entry()
+    end)
+    
+    if not entry_ok or not entry then
+      return {}, "Failed to get cursor entry"
+    end
+    
+    local dir_ok, current_dir = pcall(function()
+      return snacks.get_current_dir()
+    end)
+    
+    if not dir_ok or not current_dir then
+      return {}, "Failed to get current directory"
+    end
+    
+    -- Process the entry
+    if entry.name and entry.name ~= ".." and entry.name ~= "." then
+      local full_path = current_dir .. entry.name
+      
+      -- Handle various entry types
+      if entry.type == "file" then
+        return { full_path }, nil
+      elseif entry.type == "directory" then
+        -- Ensure directory paths end with /
+        return { full_path:match("/$") and full_path or full_path .. "/" }, nil
+      else
+        -- For unknown types, return the path anyway
+        return { full_path }, nil
+      end
+    end
+  end
+  
   return {}, "No file found under cursor"
 end
 
